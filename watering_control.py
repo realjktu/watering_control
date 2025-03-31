@@ -1,208 +1,171 @@
-#! /usr/bin/python3
+#!/usr/bin/env python3
 
-import time
-import sys
-import yaml
-from datetime import datetime, timedelta
 import logging
+import sys
+import time
+from datetime import datetime, timedelta
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
-#import RPi.GPIO as GPIO
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    GPIO = None  # Mock or fallback handled later
 
-# dh - OFF
-# dl - ON
-#chan_list = [2, 3, 4, 17, 27, 22, 10, 9]
-high_level_pin = 23
-low_level_pin = 24
-'''
-zones = {'zone1': 3,
-        'zone2': 4,
-        'zone3': 17,
-        'zone4': 27,
-        'zone5': 22,
-        'zone6': 10
-        }
-'''
+
+HIGH_LEVEL_PIN = 23
+LOW_LEVEL_PIN = 24
+
 
 class RPIWatering:
-
-    output_pins = []
-    main_power_pin = 9
-
     def __init__(self, output_pins, input_pins, main_power_pin):
         self.output_pins = output_pins
         self.main_power_pin = main_power_pin
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self.output_pins, GPIO.OUT, initial=GPIO.HIGH)
         GPIO.setup(input_pins, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        #GPIO.setup(high_level_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        #GPIO.setup(low_level_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         for ch in self.output_pins:
-            self.set_status_rpi(ch, True) #OFF
+            self.set_status_rpi(ch, True)  # OFF
 
     def get_status(self, channel):
-        ch_status = GPIO.input(channel)
-        if ch_status == 0:
-            return True
-        if ch_status == 1:
-            return False
+        return GPIO.input(channel) == 0
 
     def set_status_rpi(self, channel, status):
-        #GPIO.output(ch, True) #OFF
-        GPIO.output(channel, status)
+        GPIO.output(channel, not status)
         return True
 
     def set_status(self, channel, status):
-        '''
-        channel - pin number
-        status - True = ON, False - OFF 
-        '''
-        logger.info(f'Check {channel} is in {status}')
+        logger.info(f"Checking status for channel {channel}: expected {status}")
         if self.get_status(channel) != status:
-            logger.info(f'Switching {channel} to {status}')
-            if status == True:
-                self.set_status_rpi(channel, False)
-            if status == False:
-                self.set_status_rpi(channel, True)
+            logger.info(f"Switching channel {channel} to {status}")
+            self.set_status_rpi(channel, status)
             self.check_main_power()
         return True
 
     def check_main_power(self):
-        target_status = False
-        for ch in self.output_pins:
-            if ch != self.main_power_pin:
-                if self.get_status(ch) == True:
-                    target_status = True
+        target_status = any(
+            self.get_status(ch) for ch in self.output_pins if ch != self.main_power_pin
+        )
         if self.get_status(self.main_power_pin) != target_status:
-            logger.info(f'Set main power {self.main_power_pin} to {target_status}')
-            if target_status == True:
-                self.set_status_rpi(self.main_power_pin, False)
-            if target_status == False:
-                self.set_status_rpi(self.main_power_pin, True)
+            logger.info(f"Setting main power {self.main_power_pin} to {target_status}")
+            self.set_status_rpi(self.main_power_pin, target_status)
 
-    def cleanup():
+    def cleanup(self):
         GPIO.cleanup()
 
+
 class RPIWateringTest:
-    states = {}
+    def __init__(self):
+        self.states = {}
 
     def get_status(self, channel):
-        return True
+        return self.states.get(channel, False)
 
     def set_status_rpi(self, channel, status):
-        #GPIO.output(ch, True) #OFF
-        GPIO.output(channel, status)
+        self.states[channel] = status
         return True
 
     def set_status(self, channel, status):
-        if channel in self.states:
-            #print(f'{channel} state in the mapping')
-            current_state = self.states[channel]
-            if current_state != status:
-                logger.info(f'Set {channel} channel to {status}')
-                self.states[channel] = status
-        else:
-            logger.info(f'Set {channel} channel to {status}')
+        current_state = self.states.get(channel)
+        if current_state != status:
+            logger.info(f"Setting test channel {channel} to {status}")
             self.states[channel] = status
         return True
 
-    def cleanup():
+    def cleanup(self):
         return True
 
 
 def is_current_time_in_interval(day: str, time_str: str, duration: int) -> bool:
-    now = datetime.now()    
-    days_map = {'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4, 'Sat': 5, 'Sun': 6}
+    now = datetime.now()
+    days_map = {
+        'Mon': 0, 'Tue': 1, 'Wed': 2,
+        'Thu': 3, 'Fri': 4, 'Sat': 5, 'Sun': 6
+    }
     target_weekday = days_map.get(day)
     if target_weekday is None:
         raise ValueError(f"Invalid day string: {day}")
+
     today_weekday = now.weekday()
     days_difference = (target_weekday - today_weekday) % 7
     interval_start_date = now.date() + timedelta(days=days_difference)
     interval_start_time = datetime.strptime(time_str, '%H:%M').time()
     interval_start = datetime.combine(interval_start_date, interval_start_time)
     interval_end = interval_start + timedelta(minutes=duration)
+
     return interval_start <= now <= interval_end
 
+
 def get_water_level():
-    high_level_bin = rpi.get_status(high_level_pin)
-    if high_level_bin == 0:
-        high_level = True
-    else:
-        high_level = False
-    low_level_bin = rpi.get_status(low_level_pin)    
-    if low_level_bin == 0:
-        low_level = True
-    else:
-        low_level = False
-    return(low_level, high_level)
-
-#GPIO.setup(channel, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-# or
-#GPIO.setup(channel, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+    high_level = rpi.get_status(HIGH_LEVEL_PIN) == 0
+    low_level = rpi.get_status(LOW_LEVEL_PIN) == 0
+    return low_level, high_level
 
 
-logging.basicConfig(format='%(asctime)s:%(levelname)s: %(message)s', filename='watering_control.log', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='watering_control.log',
+    level=logging.INFO
+)
+
+if len(sys.argv) < 2:
+    logger.critical("Configuration file path not provided.")
+    sys.exit(1)
 
 with open(sys.argv[1]) as stream:
     try:
         config = yaml.safe_load(stream)
     except yaml.YAMLError as exc:
         logger.critical(exc)
-chan_list = []
-chan_list.append(config['general']['main_power_channel'])
-if config['general'].get('water_input_channel', '')!= '':
+        sys.exit(1)
+
+chan_list = [config['general']['main_power_channel']]
+
+if config['general'].get('water_input_channel'):
     chan_list.append(config['general']['water_input_channel'])
 
-for zone_name, zone_config in config['zones'].items():
-    chan_list.append(zone_config['channel'])
+for zone in config['zones'].values():
+    chan_list.append(zone['channel'])
 
-try:
-    import RPi.GPIO as GPIO
-    rpi = RPIWatering(chan_list, [high_level_pin, low_level_pin], config['general']['main_power_channel'])
-except ImportError:
-    logger.info('There is no RPI module. Switching to test class')
+if GPIO:
+    rpi = RPIWatering(chan_list, [HIGH_LEVEL_PIN, LOW_LEVEL_PIN], config['general']['main_power_channel'])
+else:
+    logger.info("RPi.GPIO not available. Using test mode.")
     rpi = RPIWateringTest()
 
-
 for ch in chan_list:
-    ch_status = rpi.get_status(ch)
-    logger.info(f'{ch} - {ch_status}')
+    logger.info(f"Channel {ch} initial status: {rpi.get_status(ch)}")
 
-#GPIO.output(9, False) # Main power ON
-#GPIO.output(2, False) # Water input ON
+try:
+    while True:
+        water_input_channel = config['general'].get('water_input_channel')
+        if water_input_channel:
+            low_level = rpi.get_status(LOW_LEVEL_PIN)
+            high_level = rpi.get_status(HIGH_LEVEL_PIN)
+            logger.info(f"Water level - Low: {low_level}, High: {high_level}")
 
-while True:
-    # Handle water input needs
-    if config['general'].get('water_input_channel', '')!= '':
-        low_level = rpi.get_status(low_level_pin)
-        high_level = rpi.get_status(high_level_pin)
-        logger.info(f'Low: {low_level}, High: {high_level}')
-        if low_level == False:
-            logger.info('Start refill')
-            #rpi.set_status(9, True) # Main power ON
-            rpi.set_status(config['general']['water_input_channel'], True) # Water input ON
-        if high_level == True:
-            logger.info('Stop refill')
-            rpi.set_status(config['general']['water_input_channel'], False) # Water input OFF
-            #rpi.set_status(9, False) # Main power OFF
+            if not low_level:
+                logger.info("Starting refill")
+                rpi.set_status(water_input_channel, True)
 
-    for zone_name, zone_config in config['zones'].items():
-        logger.info(zone_name)
-        current_needs = False
-        for period in zone_config.get('schedule', []):
-            #print(period)
-            need_watering = is_current_time_in_interval(period['day'], 
-                                                        period['time'], 
-                                                        period['duration'])
-            if need_watering == True:
-                logger.info(f'{zone_name} zone needs watering')
-                current_needs = True
-        rpi.set_status(zone_config['channel'], current_needs)
+            if high_level:
+                logger.info("Stopping refill")
+                rpi.set_status(water_input_channel, False)
 
-    time.sleep(config['general']['sleep_time'])
+        for zone_name, zone_config in config['zones'].items():
+            logger.info(f"Checking schedule for zone: {zone_name}")
+            current_needs = any(
+                is_current_time_in_interval(period['day'], period['time'], period['duration'])
+                for period in zone_config.get('schedule', [])
+            )
+            if current_needs:
+                logger.info(f"{zone_name} needs watering")
+            rpi.set_status(zone_config['channel'], current_needs)
 
-rpi.cleanup()
+        time.sleep(config['general']['sleep_time'])
 
-
+except KeyboardInterrupt:
+    logger.info("Shutting down watering system...")
+    rpi.cleanup()
