@@ -1,0 +1,11 @@
+[Unit]
+ Description=Watering Control
+
+[Service]
+ User=root
+ WorkingDirectory=/opt/watering_control
+ ExecStart=/usr/bin/python3 /opt/watering_control/watering_control.py watering_config_north.yaml
+ Restart=always
+
+[Install]
+ WantedBy=multi-user.target

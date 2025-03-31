@@ -1,0 +1,46 @@
+general:
+  sleep_time: 30
+  main_power_channel: 9
+  water_input_channel: 2
+zones:
+  zone1:
+    channel: 3
+    schedule:
+    - day: Mon
+      time: '09:00'
+      duration: 60
+    - day: Tue
+      time: '06:00'
+      duration: 60
+    - day: Wed
+      time: '06:00'
+      duration: 60
+    - day: Thu
+      time: '06:00'
+      duration: 60
+    - day: Fri
+      time: '06:00'
+      duration: 60
+    - day: Sat
+      time: '06:00'
+      duration: 60
+    - day: Sun
+      time: '21:45'
+      duration: 60
+    - day: Sun
+      time: '20:45'
+      duration: 60
+  zone2:
+    channel: 4
+    schedule:
+    - day: Mon
+      time: '06:00'
+      duration: 60
+  zone3:
+    channel: 17
+  zone4:
+    channel: 27
+  zone5:
+    channel: 22
+  zone6:
+    channel: 10
