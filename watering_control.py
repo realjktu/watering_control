@@ -5,6 +5,10 @@ import sys
 import yaml
 from datetime import datetime, timedelta
 import logging
+try:
+    import RPi.GPIO as GPIO
+except ImportError:
+    GPIO = None  # Mock or fallback handled later
 
 logger = logging.getLogger(__name__)
 
@@ -158,11 +162,10 @@ if config['general'].get('water_input_channel', '')!= '':
 for zone_name, zone_config in config['zones'].items():
     chan_list.append(zone_config['channel'])
 
-try:
-    import RPi.GPIO as GPIO
+if GPIO:
     rpi = RPIWatering(chan_list, [high_level_pin, low_level_pin], config['general']['main_power_channel'])
-except ImportError:
-    logger.info('There is no RPI module. Switching to test class')
+else:
+    logger.info("RPi.GPIO not available. Using test mode.")
     rpi = RPIWateringTest()
 
 

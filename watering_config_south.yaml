@@ -1,0 +1,18 @@
+general:
+  sleep_time: 30
+  main_power_channel: 9
+zones:
+  bottom_empty1:
+    channel: 2
+  bottom_empty2:
+    channel: 3
+  far_bottom:
+    channel: 4
+  house_bottom:
+    channel: 17
+  top_grass:
+    channel: 27
+  top_drips:
+    channel: 22
+  empty:
+    channel: 10
