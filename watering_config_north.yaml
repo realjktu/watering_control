@@ -7,7 +7,7 @@ zones:
     channel: 3
     schedule:
     - day: Mon
-      time: '09:00'
+      time: '08:57'
       duration: 60
     - day: Tue
       time: '06:00'
