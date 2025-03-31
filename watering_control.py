@@ -112,29 +112,17 @@ class RPIWateringTest:
 
 
 def is_current_time_in_interval(day: str, time_str: str, duration: int) -> bool:
-    # Получаем текущее время
-    now = datetime.now()
-    
-    # Преобразуем день недели из строки в индекс (Mon=0, Sun=6)
+    now = datetime.now()    
     days_map = {'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4, 'Sat': 5, 'Sun': 6}
     target_weekday = days_map.get(day)
-
     if target_weekday is None:
         raise ValueError(f"Invalid day string: {day}")
-
-    # Создаем datetime объекта начала интервала для этой недели
     today_weekday = now.weekday()
     days_difference = (target_weekday - today_weekday) % 7
     interval_start_date = now.date() + timedelta(days=days_difference)
-
-    # Время начала интервала
     interval_start_time = datetime.strptime(time_str, '%H:%M').time()
     interval_start = datetime.combine(interval_start_date, interval_start_time)
-
-    # Время окончания интервала
     interval_end = interval_start + timedelta(minutes=duration)
-
-    # Проверка попадания текущего времени в интервал
     return interval_start <= now <= interval_end
 
 def get_water_level():
