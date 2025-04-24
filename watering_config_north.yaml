@@ -1,10 +1,35 @@
 general:
-  sleep_time: 30
+  device_name: 'NorthWatering'
   main_power_channel: 9
   water_input_channel: 2
+  sleep_time: 30
+  refill_timeout: 20
+  blocking_timeout: 30
+  config_reload_timeout: 5
 zones:
   zone1:
     channel: 3
+    schedule:
+    - day: Mon
+      time: '20:00'
+      duration: 60
+    - day: Wed
+      time: '20:00'
+      duration: 60
+    - day: Fri
+      time: '20:00'
+      duration: 60
+    - day: Sun
+      time: '20:00'
+      duration: 60
+  plants:
+    channel: 4
+  zone3:
+    channel: 17
+  zone4:
+    channel: 27
+  zone5_test:
+    channel: 22
     schedule:
     - day: Mon
       time: '11:00'
@@ -30,17 +55,5 @@ zones:
     - day: Sun
       time: '20:45'
       duration: 60
-  zone2:
-    channel: 4
-    schedule:
-    - day: Mon
-      time: '06:00'
-      duration: 60
-  zone3:
-    channel: 17
-  zone4:
-    channel: 27
-  zone5:
-    channel: 22
   zone6:
     channel: 10

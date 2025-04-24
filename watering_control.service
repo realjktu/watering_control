@@ -1,8 +1,12 @@
 [Unit]
  Description=Watering Control
+ After=network.target
 
 [Service]
  User=root
+ Environment="MQTT_HOST="
+ Environment="MQTT_USER="
+ Environment="MQTT_PASSWORD="
  WorkingDirectory=/opt/watering_control
  ExecStart=/usr/bin/python3 /opt/watering_control/watering_control.py watering_config_north.yaml
  Restart=always

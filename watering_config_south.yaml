@@ -1,6 +1,9 @@
 general:
-  sleep_time: 30
+  device_name: 'SouthWatering'
   main_power_channel: 9
+  sleep_time: 30
+  blocking_timeout: 60
+  config_reload_timeout: 5
 zones:
   bottom_empty1:
     channel: 2
@@ -8,11 +11,63 @@ zones:
     channel: 3
   far_bottom:
     channel: 4
+    schedule:
+    - day: Mon
+      time: '21:00'
+      duration: 60
+    - day: Wed
+      time: '21:00'
+      duration: 60
+    - day: Fri
+      time: '21:00'
+      duration: 60
+    - day: Sun
+      time: '21:00'
+      duration: 60
   house_bottom:
     channel: 17
+    schedule:
+    - day: Mon
+      time: '22:00'
+      duration: 60
+    - day: Wed
+      time: '22:00'
+      duration: 60
+    - day: Fri
+      time: '22:00'
+      duration: 60
+    - day: Sun
+      time: '22:00'
+      duration: 60
   top_grass:
     channel: 27
+    schedule:
+    - day: Tue
+      time: '21:00'
+      duration: 60
+    - day: Thu
+      time: '21:00'
+      duration: 60
+    - day: Sat
+      time: '21:00'
+      duration: 60
+    - day: Sun
+      time: '23:00'
+      duration: 60
   top_drips:
     channel: 22
+    schedule:
+    - day: Mon
+      time: '20:00'
+      duration: 60
+    - day: Wed
+      time: '20:00'
+      duration: 60
+    - day: Fri
+      time: '20:00'
+      duration: 60
+    - day: Sun
+      time: '20:00'
+      duration: 60
   empty:
     channel: 10
