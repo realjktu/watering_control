@@ -15,7 +15,7 @@ zones:
     - day: Mon
       time: '21:00'
       duration: 60
-    - day: Wed
+    - day: Thu
       time: '21:00'
       duration: 60
     - day: Fri
@@ -30,7 +30,7 @@ zones:
     - day: Mon
       time: '22:00'
       duration: 60
-    - day: Wed
+    - day: Thu
       time: '22:00'
       duration: 60
     - day: Fri
@@ -45,7 +45,7 @@ zones:
     - day: Tue
       time: '21:00'
       duration: 60
-    - day: Thu
+    - day: Wed
       time: '21:00'
       duration: 60
     - day: Sat

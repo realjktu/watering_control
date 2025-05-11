@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import logging
 import paho.mqtt.client as mqtt
 import threading
+import requests
 try:
     import RPi.GPIO as GPIO
 except ImportError:
@@ -20,6 +21,7 @@ except ImportError:
 #chan_list = [2, 3, 4, 17, 27, 22, 10, 9]
 high_level_pin = 23
 low_level_pin = 24
+rain_pin = 11
 '''
 zones = {'zone1': 3,
         'zone2': 4,
@@ -29,6 +31,22 @@ zones = {'zone1': 3,
         'zone6': 10
         }
 '''
+
+def get_rain_status:
+    try:
+        response = requests.get(
+            "https://ha.jktu.org.ua/api/states/sensor.northwatering_rain",
+            headers={"Authorization": f"Bearer {os.getenv("HA_TOKEN", '')}"},
+        )
+        json_response = response.json()
+        rain_status = json_response["state"]
+        if rain_status == 'Yes':
+            return True
+        else:
+            return False
+    except Exception as e:
+        logging.error(f"Failed to get rain status: {e}")
+    return False
 
 class HAMqtt:
     mqtt_host = os.getenv("MQTT_HOST", '')
@@ -285,6 +303,13 @@ def on_message(mqttc, obj, msg):
     status_to_send = {}
     low_level = rpi.get_status(low_level_pin)
     high_level = rpi.get_status(high_level_pin)
+    rain_detect = rpi.get_status(rain_pin)
+    if rain_detect == True:
+        status_to_send['rain_state'] = 'No'
+        logger.info(f'Rain: No')
+    else:
+        status_to_send['rain_state'] = 'Yes'
+        logger.info(f'Rain: Yes')
     if low_level == True:
         status_to_send['low_water_state'] = 'Yes'
     else:
@@ -328,8 +353,9 @@ for zone_name, zone_config in config['zones'].items():
     ham.create_ha_device(device_name, zone_name)
 ham.create_ha_sensor(device_name, 'high_water')
 ham.create_ha_sensor(device_name, 'low_water')
+ham.create_ha_sensor(device_name, 'rain')
 if GPIO:
-    rpi = RPIWatering(chan_list, [high_level_pin, low_level_pin], config['general']['main_power_channel'])
+    rpi = RPIWatering(chan_list, [high_level_pin, low_level_pin, rain_pin], config['general']['main_power_channel'])
 else:
     logger.info("RPi.GPIO not available. Using test mode.")
     rpi = RPIWateringTest()
@@ -349,11 +375,21 @@ def main():
         if time.time() - config_reload_timer > config['general']['config_reload_timeout']*60:
             config = load_config()
             config_reload_timer = time.time()
+        rain_status = get_rain_status()
+        if rain_status == True:
+            logger.info('Rain detected. No need watering.')
         status_to_send = {}
         # Handle water input needs
         if config['general'].get('water_input_channel', '')!= '':
             low_level = rpi.get_status(low_level_pin)
             high_level = rpi.get_status(high_level_pin)
+            rain_detect = rpi.get_status(rain_pin)
+            if rain_detect == True:
+                status_to_send['rain_state'] = 'No'
+                logger.info(f'Rain: No')
+            else:
+                status_to_send['rain_state'] = 'Yes'
+                logger.info(f'Rain: Yes')
             if low_level == True:
                 status_to_send['low_water_state'] = 'Yes'
             else:
@@ -393,7 +429,7 @@ def main():
                 need_watering = is_current_time_in_interval(period['day'], 
                                                             period['time'], 
                                                             period['duration'])
-                if need_watering == True:
+                if need_watering == True and rain_status == False:
                     logger.info(f'{zone_name} zone needs watering')
                     current_needs = True
             rpi.set_status(zone_config['channel'], current_needs)
