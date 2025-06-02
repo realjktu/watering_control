@@ -32,11 +32,11 @@ zones = {'zone1': 3,
         }
 '''
 
-def get_rain_status:
+def get_rain_status():
     try:
         response = requests.get(
             "https://ha.jktu.org.ua/api/states/sensor.northwatering_rain",
-            headers={"Authorization": f"Bearer {os.getenv("HA_TOKEN", '')}"},
+            headers={"Authorization": f"Bearer {os.getenv('HA_TOKEN', '')}"},
         )
         json_response = response.json()
         rain_status = json_response["state"]
@@ -46,7 +46,7 @@ def get_rain_status:
             return False
     except Exception as e:
         logging.error(f"Failed to get rain status: {e}")
-    return False
+    return True
 
 class HAMqtt:
     mqtt_host = os.getenv("MQTT_HOST", '')
