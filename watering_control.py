@@ -15,6 +15,9 @@ try:
 except ImportError:
     GPIO = None  # Mock or fallback handled later
 
+TRIG = 26  # Associate pin 27 to TRIG
+ECHO = 19  # Associate pin 22 to Echo
+
 #import RPi.GPIO as GPIO
 # dh - OFF
 # dl - ON
@@ -110,6 +113,56 @@ class HAMqtt:
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
 
+    def create_storage_sensor(self, device_name, zone_name):
+        payload = {
+          "device": {
+            "identifiers": [
+              device_name
+            ],
+            "manufacturer": "JktuLTD",
+            "model": "WTR-01",
+            "name": device_name,
+            "serial_number": "01020304"
+          },
+          "name": zone_name,
+          "device_class": "volume_storage",
+          "unit_of_measurement": "L",
+          "state_class": "measurement",
+          "object_id": f'{device_name}-{zone_name}',
+          "state_topic": f"watering/{device_name}/state",
+          "unique_id": f'{device_name}-{zone_name}',
+          "value_template": f"{{{{ value_json.{zone_name}_state }}}}",
+          #"device_class": "enum",
+          "enabled_by_default": True
+        }
+        config_topic = f"homeassistant/sensor/{device_name}/{zone_name}/config"
+        self.send_data(config_topic, json.dumps(payload))
+
+    def create_flow_sensor(self, device_name, zone_name):
+        payload = {
+          "device": {
+            "identifiers": [
+              device_name
+            ],
+            "manufacturer": "JktuLTD",
+            "model": "WTR-01",
+            "name": device_name,
+            "serial_number": "01020304"
+          },
+          "name": zone_name,
+          "device_class": "volume_flow_rate",
+          "unit_of_measurement": "L/m",
+          "state_class": "measurement",
+          "object_id": f'{device_name}-{zone_name}',
+          "state_topic": f"watering/{device_name}/state",
+          "unique_id": f'{device_name}-{zone_name}',
+          "value_template": f"{{{{ value_json.{zone_name}_state }}}}",
+          #"device_class": "enum",
+          "enabled_by_default": True
+        }
+        config_topic = f"homeassistant/sensor/{device_name}/{zone_name}/config"
+        self.send_data(config_topic, json.dumps(payload))
+
     def create_ha_sensor(self, device_name, zone_name):
         payload = {
           "device": {
@@ -163,6 +216,8 @@ class RPIWatering:
     output_pins = []
     main_power_pin = 9
     manual_execution = {}
+    water_flowtimer = 0
+    water_volume = 0
 
     def __init__(self, output_pins, input_pins, main_power_pin):
         self.output_pins = output_pins
@@ -170,10 +225,72 @@ class RPIWatering:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self.output_pins, GPIO.OUT, initial=GPIO.HIGH)
         GPIO.setup(input_pins, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.setup(TRIG, GPIO.OUT)  # Set pin as GPIO out
+        GPIO.setup(ECHO, GPIO.IN)  # Set pin as GPIO in
+        GPIO.output(TRIG, False)  # Set TRIG as LOW
         #GPIO.setup(high_level_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         #GPIO.setup(low_level_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         for ch in self.output_pins:
             self.set_status_rpi(ch, True) #OFF
+
+    def get_water_amount(self):
+        distance_stat = []
+        while True:
+            distance = self.get_distance()
+            #logger.info(f'Distance: {distance}')
+            if distance > 20 and distance < 200:
+                distance_stat.append(distance)
+            if len(distance_stat)>=5:
+                break
+        distance = sum(distance_stat) / len(distance_stat)
+        #logger.info(f'Distance stat: {distance_stat}!!')
+        #logger.info(f'Distance: {distance}!!')
+        '''
+            700 - 38.5
+            800 - 29
+        '''
+        distance = round(distance, 2)
+        amount = (-11.11 * distance) + 1122.19
+        amount = round(amount, 0)
+        old_flowtimer = self.water_flowtimer
+        self.water_flowtimer = round(time.time())
+        old_volume = self.water_volume
+        self.water_volume = amount
+        water_flow = 0
+        if self.water_flowtimer > 0:
+            time_diff = self.water_flowtimer - old_flowtimer
+            water_diff = self.water_volume - old_volume
+            water_flow = round((water_diff / time_diff)*60)
+        logger.info(f'Distance: {distance} cm, Volume: {amount} liters, Water flow: {water_flow} l/min')
+        return (amount, water_flow)
+
+    def get_distance(self):
+        timeout = 1
+        GPIO.output(TRIG, True)  # Set TRIG as HIGH
+        time.sleep(0.00001)  # Delay of 0.00001 seconds
+        GPIO.output(TRIG, False)  # Set TRIG as LOW
+
+        pulse_start = time.time()
+        timeout_start = pulse_start
+        while GPIO.input(ECHO) == 0:
+            pulse_start = time.time()
+            if pulse_start - timeout_start > timeout:
+                break
+
+        pulse_end = time.time()
+        timeout_end = pulse_end
+        if GPIO.input(ECHO) == 1:
+            while GPIO.input(ECHO) == 1:
+                pulse_end = time.time()
+                if pulse_end - timeout_end > timeout:
+                    break
+
+        pulse_duration = pulse_end - pulse_start  # Pulse duration to a variable
+        #print(f'pulse_duration: {pulse_duration}')
+        distance = pulse_duration * 17150  # Calculate distance
+        distance = round(distance, 2)  # Round to two decimal points
+        #print("Distance:", distance, "cm")
+        return distance
 
     def get_status(self, channel):
         ch_status = GPIO.input(channel)
@@ -192,6 +309,13 @@ class RPIWatering:
                 res[f'{zone_name}_state'] = 'OFF'
         return res
 
+    def get_input_status(self, input_channel):
+        res={}
+        status = self.get_status(input_channel)
+        if status == True:
+            return 'ON'
+        if status == False:
+            return 'OFF'
 
     def set_status_rpi(self, channel, status):
         #GPIO.output(ch, True) #OFF
@@ -304,6 +428,9 @@ def on_message(mqttc, obj, msg):
     low_level = rpi.get_status(low_level_pin)
     high_level = rpi.get_status(high_level_pin)
     rain_detect = rpi.get_status(rain_pin)
+    water_amount, water_flow = rpi.get_water_amount()
+    status_to_send['storage_state'] = water_amount
+    status_to_send['flow_state'] = water_flow
     if rain_detect == True:
         status_to_send['rain_state'] = 'No'
         logger.info(f'Rain: No')
@@ -354,6 +481,9 @@ for zone_name, zone_config in config['zones'].items():
 ham.create_ha_sensor(device_name, 'high_water')
 ham.create_ha_sensor(device_name, 'low_water')
 ham.create_ha_sensor(device_name, 'rain')
+ham.create_ha_sensor(device_name, 'input_water')
+ham.create_storage_sensor(device_name, 'storage')
+ham.create_flow_sensor(device_name, 'flow')
 if GPIO:
     rpi = RPIWatering(chan_list, [high_level_pin, low_level_pin, rain_pin], config['general']['main_power_channel'])
 else:
@@ -381,9 +511,12 @@ def main():
         status_to_send = {}
         # Handle water input needs
         if config['general'].get('water_input_channel', '')!= '':
+            water_amount, water_flow = rpi.get_water_amount()
             low_level = rpi.get_status(low_level_pin)
             high_level = rpi.get_status(high_level_pin)
             rain_detect = rpi.get_status(rain_pin)
+            status_to_send['storage_state'] = water_amount
+            status_to_send['flow_state'] = water_flow
             if rain_detect == True:
                 status_to_send['rain_state'] = 'No'
                 logger.info(f'Rain: No')
@@ -396,23 +529,29 @@ def main():
                 status_to_send['low_water_state'] = 'No'
             if high_level == True:
                 status_to_send['high_water_state'] = 'Yes'
+                status_to_send['storage_state'] = 1000
             else:
                 status_to_send['high_water_state'] = 'No'
             logger.info(f'Low: {low_level}, High: {high_level}')
-            if low_level == False and high_level == False:
+            #if low_level == False and high_level == False:
+            if water_amount < config['general']['refill_amount'] and high_level == False:
                 logger.info('Start refill')
                 refill_timer = time.time()
                 #rpi.set_status(9, True) # Main power ON
                 rpi.set_status(config['general']['water_input_channel'], True) # Water input ON
+                #status_to_send['input_water_state'] = 'Yes'
             if refill_timer > 0 and time.time() - refill_timer > config['general']['refill_timeout']*60:
                 logger.info('Force stop refill')
                 refill_timer = 0
                 rpi.set_status(config['general']['water_input_channel'], False) # Water input OFF
+                #status_to_send['input_water_state'] = 'No'
             if high_level == True:
                 logger.info('Stop refill')
                 refill_timer = 0
                 rpi.set_status(config['general']['water_input_channel'], False) # Water input OFF
                 #rpi.set_status(9, False) # Main power OFF
+                #status_to_send['input_water_state'] = 'No'
+            status_to_send['input_water_state'] = rpi.get_input_status(config['general']['water_input_channel'])
 
         for zone_name, zone_config in config['zones'].items():
             logger.info(zone_name)

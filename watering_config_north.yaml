@@ -3,7 +3,8 @@ general:
   main_power_channel: 9
   water_input_channel: 2
   sleep_time: 30
-  refill_timeout: 20
+  refill_timeout: 30
+  refill_amount: 700
   blocking_timeout: 30
   config_reload_timeout: 5
 zones:
@@ -12,7 +13,7 @@ zones:
     schedule:
     - day: Mon
       time: '20:00'
-      duration: 60
+      duration: 30
     - day: Wed
       time: '20:00'
       duration: 60
@@ -21,9 +22,22 @@ zones:
       duration: 60
     - day: Sun
       time: '20:00'
-      duration: 60
+      duration: 30
   plants:
     channel: 4
+    schedule:
+    - day: Mon
+      time: '07:30'
+      duration: 15
+    - day: Wed
+      time: '07:30'
+      duration: 30
+    - day: Fri
+      time: '07:30'
+      duration: 30
+    - day: Sun
+      time: '07:30'
+      duration: 15
   zone3:
     channel: 17
   zone4:
