@@ -28,16 +28,16 @@ zones:
     channel: 17
     schedule:
     - day: Mon
-      time: '22:00'
+      time: '23:00'
       duration: 60
     - day: Thu
-      time: '22:00'
+      time: '23:00'
       duration: 60
     - day: Fri
-      time: '22:00'
+      time: '23:00'
       duration: 60
     - day: Sun
-      time: '22:00'
+      time: '23:00'
       duration: 60
   top_grass:
     channel: 27
