@@ -425,28 +425,29 @@ def on_message(mqttc, obj, msg):
         blocked_zones.pop(zone)
 
     status_to_send = {}
-    low_level = rpi.get_status(low_level_pin)
-    high_level = rpi.get_status(high_level_pin)
-    rain_detect = rpi.get_status(rain_pin)
-    water_amount, water_flow = rpi.get_water_amount()
-    status_to_send['storage_state'] = water_amount
-    status_to_send['flow_state'] = water_flow
-    if rain_detect == True:
-        status_to_send['rain_state'] = 'No'
-        logger.info(f'Rain: No')
-    else:
-        status_to_send['rain_state'] = 'Yes'
-        logger.info(f'Rain: Yes')
-    if low_level == True:
-        status_to_send['low_water_state'] = 'Yes'
-    else:
-        status_to_send['low_water_state'] = 'No'
-    if high_level == True:
-        status_to_send['high_water_state'] = 'Yes'
-    else:
-        status_to_send['high_water_state'] = 'No'
+    if config['general'].get('water_input_channel', '')!= '':
+        low_level = rpi.get_status(low_level_pin)
+        high_level = rpi.get_status(high_level_pin)
+        rain_detect = rpi.get_status(rain_pin)
+        water_amount, water_flow = rpi.get_water_amount()
+        status_to_send['storage_state'] = water_amount
+        status_to_send['flow_state'] = water_flow
+        if rain_detect == True:
+            status_to_send['rain_state'] = 'No'
+            logger.info(f'Rain: No')
+        else:
+            status_to_send['rain_state'] = 'Yes'
+            logger.info(f'Rain: Yes')
+        if low_level == True:
+            status_to_send['low_water_state'] = 'Yes'
+        else:
+            status_to_send['low_water_state'] = 'No'
+        if high_level == True:
+            status_to_send['high_water_state'] = 'Yes'
+        else:
+            status_to_send['high_water_state'] = 'No'
     status_to_send = status_to_send | rpi.get_all_status(config['zones'])
-    #logger.info(f'watering/{device_name}/state message: {json.dumps(status_to_send)}')
+    logger.debug(f'watering/{device_name}/state message: {json.dumps(status_to_send)}')
     time.sleep(1)
     threading.Thread(target=lambda: ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))).start()
     #ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))
@@ -464,7 +465,7 @@ def load_config():
             logger.critical(exc)
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", filename='watering_control.log', level=logging.INFO)
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", filename='watering_control.log', level=logging.DEBUG)
 #logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 rpi = ''
 config = load_config()
@@ -502,6 +503,7 @@ def main():
     config_reload_timer = time.time()
     config = load_config()
     while True:
+        logger.debug('Main loop started')
         if time.time() - config_reload_timer > config['general']['config_reload_timeout']*60:
             config = load_config()
             config_reload_timer = time.time()
@@ -576,6 +578,7 @@ def main():
         status_to_send = status_to_send | rpi.get_all_status(config['zones'])
         #logger.info(f'watering/{device_name}/state message: {json.dumps(status_to_send)}')
         ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))
+        logger.debug('Main loop done')
         time.sleep(config['general']['sleep_time'])
 
     rpi.cleanup()
