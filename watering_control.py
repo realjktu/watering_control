@@ -5,6 +5,7 @@ import sys
 import yaml
 import json
 import os
+import signal
 from datetime import datetime, timedelta
 import logging
 import paho.mqtt.client as mqtt
@@ -56,6 +57,10 @@ class HAMqtt:
     mqtt_user = os.getenv("MQTT_USER", '')
     mqtt_password = os.getenv("MQTT_PASSWORD", '')
     mqtt_client = ''
+    connected = False
+    reconnect_delay = 1
+    max_reconnect_delay = 60
+    subscriptions = []
 
     def __init__(self):
         # Check for missing configurations
@@ -66,34 +71,126 @@ class HAMqtt:
         self.mqtt_client = self.setup_mqtt_client()
         self.mqtt_client.loop_start()
 
-
     def setup_mqtt_client(self) -> mqtt.Client:
-        """Setup and return an MQTT client."""
-        mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        """Setup and return an MQTT client with reconnection support."""
+        mqtt_client = mqtt.Client()
         mqtt_client.username_pw_set(self.mqtt_user, self.mqtt_password)
-        #mqtt_client.on_publish = self.on_publish
+        
+        # Set up callback handlers
+        mqtt_client.on_connect = self.on_connect
+        mqtt_client.on_disconnect = self.on_disconnect
+        mqtt_client.on_publish = self.on_publish
+        
+        # Note: reconnect_delay_set is not available in paho-mqtt 2.1.0
+        # We'll handle reconnection manually in connect_with_retry
+        
         mqtt_client.user_data_set(set())
-        while True:
+        
+        # Initial connection
+        self.connect_with_retry(mqtt_client)
+        return mqtt_client
+
+    def connect_with_retry(self, mqtt_client):
+        """Attempt to connect to MQTT broker with exponential backoff."""
+        while not self.connected:
             try:
                 mqtt_client.connect(self.mqtt_host)
                 logging.info("Connected to MQTT broker.")
-                return mqtt_client
+                self.connected = True
+                self.reconnect_delay = 1  # Reset delay on successful connection
             except Exception as e:
                 logging.error(f"Failed to connect to MQTT broker: {e}")
-                time.sleep(3)
+                logging.info(f"Retrying in {self.reconnect_delay} seconds...")
+                time.sleep(self.reconnect_delay)
+                # Exponential backoff with max delay
+                self.reconnect_delay = min(self.reconnect_delay * 2, self.max_reconnect_delay)
+
+    def on_connect(self, client, userdata, flags, rc):
+        """Callback for MQTT on_connect event."""
+        if rc == 0:
+            self.connected = True
+            logging.info("Successfully connected to MQTT broker")
+            # Resubscribe to all topics
+            self.resubscribe_all()
+        else:
+            self.connected = False
+            logging.error(f"Failed to connect to MQTT broker. Reason code: {rc}")
+
+    def on_disconnect(self, client, userdata, rc):
+        """Callback for MQTT on_disconnect event."""
+        self.connected = False
+        if rc != 0:
+            logging.warning(f"Unexpected disconnection from MQTT broker. Reason code: {rc}")
+        else:
+            logging.info("Disconnected from MQTT broker")
+
+    def resubscribe_all(self):
+        """Resubscribe to all previously subscribed topics."""
+        for topic in self.subscriptions:
+            try:
+                result = self.mqtt_client.subscribe(topic)
+                if result[0] == mqtt.MQTT_ERR_SUCCESS:
+                    logging.debug(f"Resubscribed to topic: {topic}")
+                else:
+                    logging.error(f"Failed to resubscribe to topic: {topic}")
+            except Exception as e:
+                logging.error(f"Error resubscribing to topic {topic}: {e}")
 
     def on_publish(self, client, userdata, mid):
         """Callback for MQTT on_publish event."""
-        print(mid)
-        print(userdata)
         userdata.discard(mid)
 
     def send_data(self, topic: str, message: str):
+        """Send data to MQTT broker with connection check."""
+        if not self.connected:
+            logging.warning("MQTT not connected. Attempting to reconnect...")
+            self.connect_with_retry(self.mqtt_client)
+        
         try:
             result = self.mqtt_client.publish(topic, message, qos=1)
-            logger.debug(f"Published to {topic}: {message} (mid={result.mid})")
+            # In paho-mqtt 2.1.0, publish returns (result, mid)
+            if result[0] == mqtt.MQTT_ERR_SUCCESS:
+                logging.debug(f"Published to {topic}: {message} (mid={result[1]})")
+            else:
+                logging.error(f"Failed to publish to {topic}. Return code: {result[0]}")
         except Exception as e:
-            logger.error(f"Failed to publish to MQTT: {e}")
+            logging.error(f"Failed to publish to MQTT: {e}")
+            # Mark as disconnected to trigger reconnection
+            self.connected = False
+
+    def subscribe(self, topic: str):
+        """Subscribe to a topic and track it for reconnection."""
+        try:
+            result = self.mqtt_client.subscribe(topic)
+            if result[0] == mqtt.MQTT_ERR_SUCCESS:
+                self.subscriptions.append(topic)
+                logging.debug(f"Subscribed to topic: {topic}")
+            else:
+                logging.error(f"Failed to subscribe to topic: {topic}")
+        except Exception as e:
+            logging.error(f"Error subscribing to topic {topic}: {e}")
+
+    def is_connected(self) -> bool:
+        """Check if MQTT client is connected."""
+        try:
+            # Try the newer method first
+            if hasattr(self.mqtt_client, 'is_connected'):
+                return self.mqtt_client.is_connected()
+            else:
+                # Fallback for older versions - check if we have a connection
+                return self.connected
+        except Exception as e:
+            logging.error(f"Error checking MQTT connection status: {e}")
+            return False
+
+    def check_connection_health(self):
+        """Check connection health and reconnect if necessary."""
+        if not self.is_connected():
+            self.connected = False
+            logging.warning("MQTT connection health check failed. Attempting to reconnect...")
+            self.connect_with_retry(self.mqtt_client)
+            return False
+        return True
 
     #def send_data(self, mqtt_client: mqtt.Client, topic: str, message: str):
     def send_data_old(self, topic: str, message: str):
@@ -210,7 +307,7 @@ class HAMqtt:
         }
         config_topic = f"homeassistant/switch/{device_name}/{zone_name}/config"
         self.send_data(config_topic, json.dumps(payload))
-        self.mqtt_client.subscribe(f'watering/{device_name}/{zone_name}/set')
+        self.subscribe(f'watering/{device_name}/{zone_name}/set')
 
 class RPIWatering:
     output_pins = []
@@ -261,7 +358,7 @@ class RPIWatering:
             time_diff = self.water_flowtimer - old_flowtimer
             water_diff = self.water_volume - old_volume
             water_flow = round((water_diff / time_diff)*60)
-        logger.info(f'Distance: {distance} cm, Volume: {amount} liters, Water flow: {water_flow} l/min')
+        logging.info(f'Distance: {distance} cm, Volume: {amount} liters, Water flow: {water_flow} l/min')
         return (amount, water_flow)
 
     def get_distance(self):
@@ -327,9 +424,9 @@ class RPIWatering:
         channel - pin number
         status - True = ON, False - OFF 
         '''
-        logger.info(f'Check {channel} is in {status}')
+        logging.info(f'Check {channel} is in {status}')
         if self.get_status(channel) != status:
-            logger.info(f'Switching {channel} to {status}')
+            logging.info(f'Switching {channel} to {status}')
             if status == True:
                 self.set_status_rpi(channel, False)
             if status == False:
@@ -344,7 +441,7 @@ class RPIWatering:
                 if self.get_status(ch) == True:
                     target_status = True
         if self.get_status(self.main_power_pin) != target_status:
-            logger.info(f'Set main power {self.main_power_pin} to {target_status}')
+            logging.info(f'Set main power {self.main_power_pin} to {target_status}')
             if target_status == True:
                 self.set_status_rpi(self.main_power_pin, False)
             if target_status == False:
@@ -370,10 +467,10 @@ class RPIWateringTest:
             #print(f'{channel} state in the mapping')
             current_state = self.states[channel]
             if current_state != status:
-                logger.info(f'Set {channel} channel to {status}')
+                logging.info(f'Set {channel} channel to {status}')
                 self.states[channel] = status
         else:
-            logger.info(f'Set {channel} channel to {status}')
+            logging.info(f'Set {channel} channel to {status}')
             self.states[channel] = status
         return True
 
@@ -412,11 +509,11 @@ def get_water_level():
 #GPIO.setup(channel, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
 def on_message(mqttc, obj, msg):
-    logger.debug("Got new MQTT message "+msg.topic + " " + str(msg.qos) + " " + str(msg.payload))
+    logging.debug("Got new MQTT message "+msg.topic + " " + str(msg.qos) + " " + str(msg.payload))
     zone=msg.topic.split('/')[2]
     command = msg.payload.decode('utf-8')
     ch = config['zones'][zone]['channel']
-    logger.info(f'Set {zone} zone ({ch}) to {str(command)}')
+    logging.info(f'Set {zone} zone ({ch}) to {str(command)}')
     if str(command) == 'ON':
         rpi.set_status(ch, True)
         blocked_zones[zone] = time.time()
@@ -434,10 +531,10 @@ def on_message(mqttc, obj, msg):
         status_to_send['flow_state'] = water_flow
         if rain_detect == True:
             status_to_send['rain_state'] = 'No'
-            logger.info(f'Rain: No')
+            logging.info(f'Rain: No')
         else:
             status_to_send['rain_state'] = 'Yes'
-            logger.info(f'Rain: Yes')
+            logging.info(f'Rain: Yes')
         if low_level == True:
             status_to_send['low_water_state'] = 'Yes'
         else:
@@ -447,11 +544,11 @@ def on_message(mqttc, obj, msg):
         else:
             status_to_send['high_water_state'] = 'No'
     status_to_send = status_to_send | rpi.get_all_status(config['zones'])
-    logger.debug(f'watering/{device_name}/state message: {json.dumps(status_to_send)}')
+    logging.debug(f'watering/{device_name}/state message: {json.dumps(status_to_send)}')
     time.sleep(1)
     threading.Thread(target=lambda: ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))).start()
     #ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))
-    logger.debug('on_message is done')
+    logging.debug('on_message is done')
     #logger.info(json.dumps(status_to_send))
     #ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))
     #rpi.set_status(zone_config['channel'], current_needs)
@@ -462,9 +559,8 @@ def load_config():
             config = yaml.safe_load(stream)
             return config
         except yaml.YAMLError as exc:
-            logger.critical(exc)
+            logging.critical(exc)
 
-logger = logging.getLogger(__name__)
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", filename='watering_control.log', level=logging.DEBUG)
 #logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
 rpi = ''
@@ -488,101 +584,129 @@ ham.create_flow_sensor(device_name, 'flow')
 if GPIO:
     rpi = RPIWatering(chan_list, [high_level_pin, low_level_pin, rain_pin], config['general']['main_power_channel'])
 else:
-    logger.info("RPi.GPIO not available. Using test mode.")
+    logging.info("RPi.GPIO not available. Using test mode.")
     rpi = RPIWateringTest()
 blocked_zones = {}
 
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    logging.info(f"Received signal {signum}. Shutting down gracefully...")
+    if 'ham' in globals():
+        ham.cleanup()
+    if 'rpi' in globals() and hasattr(rpi, 'cleanup'):
+        rpi.cleanup()
+    sys.exit(0)
+
 def main():
-    for ch in chan_list:
-        ch_status = rpi.get_status(ch)
-        logger.info(f'{ch} - {ch_status}')
+    try:
+        for ch in chan_list:
+            ch_status = rpi.get_status(ch)
+            logging.info(f'{ch} - {ch_status}')
 
-    #GPIO.output(9, False) # Main power ON
-    #GPIO.output(2, False) # Water input ON
-    refill_timer = 0
-    config_reload_timer = time.time()
-    config = load_config()
-    while True:
-        logger.debug('Main loop started')
-        if time.time() - config_reload_timer > config['general']['config_reload_timeout']*60:
-            config = load_config()
-            config_reload_timer = time.time()
-        rain_status = get_rain_status()
-        if rain_status == True:
-            logger.info('Rain detected. No need watering.')
-        status_to_send = {}
-        # Handle water input needs
-        if config['general'].get('water_input_channel', '')!= '':
-            water_amount, water_flow = rpi.get_water_amount()
-            low_level = rpi.get_status(low_level_pin)
-            high_level = rpi.get_status(high_level_pin)
-            rain_detect = rpi.get_status(rain_pin)
-            status_to_send['storage_state'] = water_amount
-            status_to_send['flow_state'] = water_flow
-            if rain_detect == True:
-                status_to_send['rain_state'] = 'No'
-                logger.info(f'Rain: No')
-            else:
-                status_to_send['rain_state'] = 'Yes'
-                logger.info(f'Rain: Yes')
-            if low_level == True:
-                status_to_send['low_water_state'] = 'Yes'
-            else:
-                status_to_send['low_water_state'] = 'No'
-            if high_level == True:
-                status_to_send['high_water_state'] = 'Yes'
-                status_to_send['storage_state'] = 1000
-            else:
-                status_to_send['high_water_state'] = 'No'
-            logger.info(f'Low: {low_level}, High: {high_level}')
-            #if low_level == False and high_level == False:
-            if water_amount < config['general']['refill_amount'] and high_level == False:
-                logger.info('Start refill')
-                refill_timer = time.time()
-                #rpi.set_status(9, True) # Main power ON
-                rpi.set_status(config['general']['water_input_channel'], True) # Water input ON
-                #status_to_send['input_water_state'] = 'Yes'
-            if refill_timer > 0 and time.time() - refill_timer > config['general']['refill_timeout']*60:
-                logger.info('Force stop refill')
-                refill_timer = 0
-                rpi.set_status(config['general']['water_input_channel'], False) # Water input OFF
-                #status_to_send['input_water_state'] = 'No'
-            if high_level == True:
-                logger.info('Stop refill')
-                refill_timer = 0
-                rpi.set_status(config['general']['water_input_channel'], False) # Water input OFF
-                #rpi.set_status(9, False) # Main power OFF
-                #status_to_send['input_water_state'] = 'No'
-            status_to_send['input_water_state'] = rpi.get_input_status(config['general']['water_input_channel'])
-
-        for zone_name, zone_config in config['zones'].items():
-            logger.info(zone_name)
-            if zone_name in blocked_zones:
-                if time.time() - blocked_zones[zone_name] > config['general']['blocking_timeout']*60:
-                    logger.info(f'Force unblock zone {zone_name}')
-                    blocked_zones.pop(zone_name)
+        #GPIO.output(9, False) # Main power ON
+        #GPIO.output(2, False) # Water input ON
+        refill_timer = 0
+        config_reload_timer = time.time()
+        mqtt_health_check_timer = time.time()
+        config = load_config()
+        while True:
+            logging.debug('Main loop started')
+            if time.time() - config_reload_timer > config['general']['config_reload_timeout']*60:
+                config = load_config()
+                config_reload_timer = time.time()
+            
+            # MQTT connection health check every 30 seconds
+            if time.time() - mqtt_health_check_timer > 30:
+                ham.check_connection_health()
+                mqtt_health_check_timer = time.time()
+            
+            rain_status = get_rain_status()
+            if rain_status == True:
+                logging.info('Rain detected. No need watering.')
+            status_to_send = {}
+            # Handle water input needs
+            if config['general'].get('water_input_channel', '')!= '':
+                water_amount, water_flow = rpi.get_water_amount()
+                low_level = rpi.get_status(low_level_pin)
+                high_level = rpi.get_status(high_level_pin)
+                rain_detect = rpi.get_status(rain_pin)
+                status_to_send['storage_state'] = water_amount
+                status_to_send['flow_state'] = water_flow
+                if rain_detect == True:
+                    status_to_send['rain_state'] = 'No'
+                    logging.info(f'Rain: No')
                 else:
-                    logger.info(f'{zone_name} zone is blocked')
-                    continue
-            current_needs = False
-            for period in zone_config.get('schedule', []):
-                #print(period)
-                need_watering = is_current_time_in_interval(period['day'], 
-                                                            period['time'], 
-                                                            period['duration'])
-                if need_watering == True and rain_status == False:
-                    logger.info(f'{zone_name} zone needs watering')
-                    current_needs = True
-            rpi.set_status(zone_config['channel'], current_needs)
+                    status_to_send['rain_state'] = 'Yes'
+                    logging.info(f'Rain: Yes')
+                if low_level == True:
+                    status_to_send['low_water_state'] = 'Yes'
+                else:
+                    status_to_send['low_water_state'] = 'No'
+                if high_level == True:
+                    status_to_send['high_water_state'] = 'Yes'
+                    status_to_send['storage_state'] = 1000
+                else:
+                    status_to_send['high_water_state'] = 'No'
+                logging.info(f'Low: {low_level}, High: {high_level}')
+                #if low_level == False and high_level == False:
+                if water_amount < config['general']['refill_amount'] and high_level == False:
+                    logging.info('Start refill')
+                    refill_timer = time.time()
+                    #rpi.set_status(9, True) # Main power ON
+                    rpi.set_status(config['general']['water_input_channel'], True) # Water input ON
+                    #status_to_send['input_water_state'] = 'Yes'
+                if refill_timer > 0 and time.time() - refill_timer > config['general']['refill_timeout']*60:
+                    logging.info('Force stop refill')
+                    refill_timer = 0
+                    rpi.set_status(config['general']['water_input_channel'], False) # Water input OFF
+                    #status_to_send['input_water_state'] = 'No'
+                if high_level == True:
+                    logging.info('Stop refill')
+                    refill_timer = 0
+                    rpi.set_status(config['general']['water_input_channel'], False) # Water input OFF
+                    #rpi.set_status(9, False) # Main power OFF
+                    #status_to_send['input_water_state'] = 'No'
+                status_to_send['input_water_state'] = rpi.get_input_status(config['general']['water_input_channel'])
 
-        status_to_send = status_to_send | rpi.get_all_status(config['zones'])
-        #logger.info(f'watering/{device_name}/state message: {json.dumps(status_to_send)}')
-        ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))
-        logger.debug('Main loop done')
-        time.sleep(config['general']['sleep_time'])
+            for zone_name, zone_config in config['zones'].items():
+                logging.info(zone_name)
+                if zone_name in blocked_zones:
+                    if time.time() - blocked_zones[zone_name] > config['general']['blocking_timeout']*60:
+                        logging.info(f'Force unblock zone {zone_name}')
+                        blocked_zones.pop(zone_name)
+                    else:
+                        logging.info(f'{zone_name} zone is blocked')
+                        continue
+                current_needs = False
+                for period in zone_config.get('schedule', []):
+                    #print(period)
+                    need_watering = is_current_time_in_interval(period['day'], 
+                                                                period['time'], 
+                                                                period['duration'])
+                    if need_watering == True and rain_status == False:
+                        logging.info(f'{zone_name} zone needs watering')
+                        current_needs = True
+                rpi.set_status(zone_config['channel'], current_needs)
 
-    rpi.cleanup()
+            status_to_send = status_to_send | rpi.get_all_status(config['zones'])
+            #logger.info(f'watering/{device_name}/state message: {json.dumps(status_to_send)}')
+            ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))
+            logging.debug('Main loop done')
+            time.sleep(config['general']['sleep_time'])
+
+    except KeyboardInterrupt:
+        logging.info("Received keyboard interrupt. Shutting down...")
+    except Exception as e:
+        logging.error(f"Unexpected error in main loop: {e}")
+    finally:
+        logging.info("Cleaning up...")
+        if 'ham' in globals():
+            ham.cleanup()
+        if 'rpi' in globals() and hasattr(rpi, 'cleanup'):
+            rpi.cleanup()
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     main()
 
