@@ -13,16 +13,16 @@ zones:
     schedule:
     - day: Mon
       time: '20:00'
-      duration: 15
+      duration: 30
     - day: Wed
       time: '20:00'
-      duration: 30
+      duration: 60
     - day: Fri
       time: '20:00'
-      duration: 30
+      duration: 60
     - day: Sun
       time: '20:00'
-      duration: 15
+      duration: 30
   plants:
     channel: 4
     schedule:
@@ -31,10 +31,10 @@ zones:
       duration: 15
     - day: Wed
       time: '07:30'
-      duration: 15
+      duration: 30
     - day: Fri
       time: '07:30'
-      duration: 15
+      duration: 30
     - day: Sun
       time: '07:30'
       duration: 15
