@@ -331,15 +331,24 @@ class RPIWatering:
         for ch in self.output_pins:
             self.set_status_rpi(ch, True) #OFF
 
-    def get_water_amount(self):
+    def get_water_amount(self, max_attempts=20):
         distance_stat = []
-        while True:
+        attempts = 0
+        while attempts < max_attempts:
+            attempts += 1
             distance = self.get_distance()
-            #logger.info(f'Distance: {distance}')
-            if distance > 20 and distance < 200:
+            if 20 < distance < 200:
                 distance_stat.append(distance)
-            if len(distance_stat)>=5:
+            if len(distance_stat) >= 5:
                 break
+
+        if len(distance_stat) == 0:
+            logging.warning(f'Sensor returned no valid readings after {max_attempts} attempts, using cached values')
+            return (self.water_volume, 0)
+
+        if len(distance_stat) < 5:
+            logging.warning(f'Sensor returned only {len(distance_stat)} valid readings out of {attempts} attempts')
+
         distance = sum(distance_stat) / len(distance_stat)
         #logger.info(f'Distance stat: {distance_stat}!!')
         #logger.info(f'Distance: {distance}!!')
