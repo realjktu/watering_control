@@ -11,63 +11,11 @@ zones:
     channel: 3
   far_bottom:
     channel: 4
-    schedule:
-    - day: Mon
-      time: '21:00'
-      duration: 30
-    - day: Thu
-      time: '21:00'
-      duration: 30
-    - day: Fri
-      time: '21:00'
-      duration: 30
-    - day: Sun
-      time: '21:00'
-      duration: 30
   house_bottom:
     channel: 17
-    schedule:
-    - day: Mon
-      time: '23:00'
-      duration: 30
-    - day: Thu
-      time: '23:00'
-      duration: 30
-    - day: Fri
-      time: '23:00'
-      duration: 30
-    - day: Sun
-      time: '23:00'
-      duration: 30
   top_grass:
     channel: 27
-    schedule:
-    - day: Tue
-      time: '21:00'
-      duration: 30
-    - day: Wed
-      time: '21:00'
-      duration: 30
-    - day: Sat
-      time: '21:00'
-      duration: 30
-    - day: Sun
-      time: '21:00'
-      duration: 30
   top_drips:
     channel: 22
-    schedule:
-    - day: Mon
-      time: '20:00'
-      duration: 15
-    - day: Wed
-      time: '20:00'
-      duration: 15
-    - day: Fri
-      time: '20:00'
-      duration: 15
-    - day: Sun
-      time: '20:00'
-      duration: 15
   empty:
     channel: 10

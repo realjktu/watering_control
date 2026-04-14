@@ -8,6 +8,7 @@ import os
 import signal
 from datetime import datetime, timedelta
 import logging
+from logging.handlers import TimedRotatingFileHandler
 import paho.mqtt.client as mqtt
 import threading
 import requests
@@ -526,9 +527,8 @@ def on_message(mqttc, obj, msg):
         low_level = rpi.get_status(low_level_pin)
         high_level = rpi.get_status(high_level_pin)
         rain_detect = rpi.get_status(rain_pin)
-        water_amount, water_flow = rpi.get_water_amount()
-        status_to_send['storage_state'] = water_amount
-        status_to_send['flow_state'] = water_flow
+        status_to_send['storage_state'] = cached_water_amount
+        status_to_send['flow_state'] = cached_water_flow
         if rain_detect == True:
             status_to_send['rain_state'] = 'No'
             logging.info(f'Rain: No')
@@ -545,7 +545,6 @@ def on_message(mqttc, obj, msg):
             status_to_send['high_water_state'] = 'No'
     status_to_send = status_to_send | rpi.get_all_status(config['zones'])
     logging.debug(f'watering/{device_name}/state message: {json.dumps(status_to_send)}')
-    time.sleep(1)
     threading.Thread(target=lambda: ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))).start()
     #ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))
     logging.debug('on_message is done')
@@ -561,8 +560,19 @@ def load_config():
         except yaml.YAMLError as exc:
             logging.critical(exc)
 
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", filename='watering_control.log', level=logging.DEBUG)
-#logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.DEBUG)
+log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+log_handler = TimedRotatingFileHandler(
+    'watering_control.log',
+    when='midnight',
+    interval=1,
+    backupCount=7,
+)
+log_handler.setFormatter(log_formatter)
+log_handler.suffix = "%Y-%m-%d"
+
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+logger.addHandler(log_handler)
 rpi = ''
 config = load_config()
 ham = HAMqtt()
@@ -587,6 +597,8 @@ else:
     logging.info("RPi.GPIO not available. Using test mode.")
     rpi = RPIWateringTest()
 blocked_zones = {}
+cached_water_amount = 0
+cached_water_flow = 0
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
@@ -626,7 +638,10 @@ def main():
             status_to_send = {}
             # Handle water input needs
             if config['general'].get('water_input_channel', '')!= '':
+                global cached_water_amount, cached_water_flow
                 water_amount, water_flow = rpi.get_water_amount()
+                cached_water_amount = water_amount
+                cached_water_flow = water_flow
                 low_level = rpi.get_status(low_level_pin)
                 high_level = rpi.get_status(high_level_pin)
                 rain_detect = rpi.get_status(rain_pin)

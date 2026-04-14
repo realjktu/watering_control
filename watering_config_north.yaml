@@ -10,64 +10,13 @@ general:
 zones:
   zone1:
     channel: 3
-    schedule:
-    - day: Mon
-      time: '20:00'
-      duration: 15
-    - day: Wed
-      time: '20:00'
-      duration: 30
-    - day: Fri
-      time: '20:00'
-      duration: 30
-    - day: Sun
-      time: '20:00'
-      duration: 15
   plants:
     channel: 4
-    schedule:
-    - day: Mon
-      time: '07:30'
-      duration: 15
-    - day: Wed
-      time: '07:30'
-      duration: 15
-    - day: Fri
-      time: '07:30'
-      duration: 15
-    - day: Sun
-      time: '07:30'
-      duration: 15
   zone3:
     channel: 17
   zone4:
     channel: 27
   zone5_test:
     channel: 22
-    schedule:
-    - day: Mon
-      time: '11:00'
-      duration: 60
-    - day: Tue
-      time: '06:00'
-      duration: 60
-    - day: Wed
-      time: '06:00'
-      duration: 60
-    - day: Thu
-      time: '06:00'
-      duration: 60
-    - day: Fri
-      time: '06:00'
-      duration: 60
-    - day: Sat
-      time: '06:00'
-      duration: 60
-    - day: Sun
-      time: '21:45'
-      duration: 60
-    - day: Sun
-      time: '20:45'
-      duration: 60
   zone6:
     channel: 10
