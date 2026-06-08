@@ -12,9 +12,9 @@ zones:
     channel: 3
   plants:
     channel: 4
-  zone3:
+  bottom_middle_grass:
     channel: 17
-  zone4:
+  bottom_grass:
     channel: 27
   zone5_test:
     channel: 22

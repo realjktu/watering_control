@@ -12,36 +12,62 @@ zones:
     channel: 3
     schedule:
     - day: Mon
-      time: '20:00'
+      time: '06:00'
       duration: 30
     - day: Wed
-      time: '20:00'
+      time: '06:00'
       duration: 60
     - day: Fri
-      time: '20:00'
+      time: '06:00'
       duration: 60
     - day: Sun
-      time: '20:00'
+      time: '06:00'
       duration: 30
   plants:
     channel: 4
     schedule:
     - day: Mon
-      time: '07:30'
-      duration: 15
+      time: '06:00'
+      duration: 30
     - day: Wed
-      time: '07:30'
+      time: '06:00'
       duration: 30
     - day: Fri
-      time: '07:30'
+      time: '06:00'
       duration: 30
     - day: Sun
-      time: '07:30'
-      duration: 15
-  zone3:
+      time: '06:00'
+      duration: 30
+  bottom_middle_grass:
     channel: 17
-  zone4:
+    schedule:
+    - day: Tue
+      time: '22:00'
+      duration: 60
+    - day: Thu
+      time: '22:00'
+      duration: 60
+    - day: Sat
+      time: '22:00'
+      duration: 60
+    - day: Sun
+      time: '22:00'
+      duration: 60
+  bottom_grass:
     channel: 27
+    schedule:
+    - day: Tue
+      time: '21:00'
+      duration: 60
+    - day: Thu
+      time: '21:00'
+      duration: 60
+    - day: Sat
+      time: '21:00'
+      duration: 60
+    - day: Sun
+      time: '21:00'
+      duration: 60
   zone5_test:
     channel: 22
     schedule:
