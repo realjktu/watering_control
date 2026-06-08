@@ -249,7 +249,7 @@ class HAMqtt:
           },
           "name": zone_name,
           "device_class": "volume_flow_rate",
-          "unit_of_measurement": "L/m",
+          "unit_of_measurement": "L/min",
           "state_class": "measurement",
           "object_id": f'{device_name}-{zone_name}',
           "state_topic": f"watering/{device_name}/state",
@@ -328,6 +328,10 @@ class RPIWatering:
         GPIO.output(TRIG, False)  # Set TRIG as LOW
         #GPIO.setup(high_level_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         #GPIO.setup(low_level_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        self.water_volume = 0
+        self.water_flowtimer = 0
+        self.volume_history = []
+        self.VOLUME_HISTORY_SIZE = 3
         for ch in self.output_pins:
             self.set_status_rpi(ch, True) #OFF
 
@@ -359,17 +363,26 @@ class RPIWatering:
         distance = round(distance, 2)
         amount = (-11.11 * distance) + 1122.19
         amount = round(amount, 0)
+
+        # Smooth volume using moving average to filter sensor noise
+        self.volume_history.append(amount)
+        if len(self.volume_history) > self.VOLUME_HISTORY_SIZE:
+            self.volume_history.pop(0)
+        smoothed_amount = round(sum(self.volume_history) / len(self.volume_history), 0)
+
         old_flowtimer = self.water_flowtimer
-        self.water_flowtimer = round(time.time())
+        now = round(time.time())
         old_volume = self.water_volume
-        self.water_volume = amount
+        self.water_flowtimer = now
+        self.water_volume = smoothed_amount
         water_flow = 0
-        if self.water_flowtimer > 0:
-            time_diff = self.water_flowtimer - old_flowtimer
-            water_diff = self.water_volume - old_volume
-            water_flow = round((water_diff / time_diff)*60)
-        logging.info(f'Distance: {distance} cm, Volume: {amount} liters, Water flow: {water_flow} l/min')
-        return (amount, water_flow)
+        if old_flowtimer > 0:
+            time_diff = now - old_flowtimer
+            if time_diff > 0:
+                water_diff = smoothed_amount - old_volume
+                water_flow = round((water_diff / time_diff) * 60)
+        logging.info(f'Distance: {distance} cm, Volume: {smoothed_amount} liters, Water flow: {water_flow} l/min')
+        return (smoothed_amount, water_flow)
 
     def get_distance(self):
         timeout = 1
