@@ -27,6 +27,8 @@ ECHO = 19  # Associate pin 22 to Echo
 high_level_pin = 23
 low_level_pin = 24
 rain_pin = 11
+bobber_full_pin = 6  # HI = tank is full
+bobber_low_pin = 5   # HI = water level less than 600 liters
 '''
 zones = {'zone1': 3,
         'zone2': 4,
@@ -323,6 +325,7 @@ class RPIWatering:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self.output_pins, GPIO.OUT, initial=GPIO.HIGH)
         GPIO.setup(input_pins, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        GPIO.setup([bobber_full_pin, bobber_low_pin], GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.setup(TRIG, GPIO.OUT)  # Set pin as GPIO out
         GPIO.setup(ECHO, GPIO.IN)  # Set pin as GPIO in
         GPIO.output(TRIG, False)  # Set TRIG as LOW
@@ -436,6 +439,21 @@ class RPIWatering:
             return 'ON'
         if status == False:
             return 'OFF'
+
+    def get_bobber_state(self):
+        '''
+        Read the tank bobber sensor (active-high).
+        bobber_full_pin HI  -> tank is full          -> 'high'
+        bobber_low_pin  HI  -> water level < 600 L    -> 'low'
+        '''
+        full = GPIO.input(bobber_full_pin)
+        low = GPIO.input(bobber_low_pin)
+        if full == 1:
+            return 'high'
+        if low == 1:
+            return 'low'
+        # Neither pin asserted (level between thresholds): keep last known meaning
+        return 'middle'
 
     def set_status_rpi(self, channel, status):
         #GPIO.output(ch, True) #OFF
@@ -565,6 +583,7 @@ def on_message(mqttc, obj, msg):
             status_to_send['high_water_state'] = 'Yes'
         else:
             status_to_send['high_water_state'] = 'No'
+        status_to_send['bobber_state'] = rpi.get_bobber_state()
     status_to_send = status_to_send | rpi.get_all_status(config['zones'])
     logging.debug(f'watering/{device_name}/state message: {json.dumps(status_to_send)}')
     threading.Thread(target=lambda: ham.send_data(f'watering/{device_name}/state', json.dumps(status_to_send))).start()
@@ -611,6 +630,7 @@ ham.create_ha_sensor(device_name, 'high_water')
 ham.create_ha_sensor(device_name, 'low_water')
 ham.create_ha_sensor(device_name, 'rain')
 ham.create_ha_sensor(device_name, 'input_water')
+ham.create_ha_sensor(device_name, 'bobber')
 ham.create_storage_sensor(device_name, 'storage')
 ham.create_flow_sensor(device_name, 'flow')
 if GPIO:
@@ -685,6 +705,8 @@ def main():
                 else:
                     status_to_send['high_water_state'] = 'No'
                 logging.info(f'Low: {low_level}, High: {high_level}')
+                status_to_send['bobber_state'] = rpi.get_bobber_state()
+                logging.info(f"Bobber: {status_to_send['bobber_state']}")
                 #if low_level == False and high_level == False:
                 if water_amount < config['general']['refill_amount'] and high_level == False:
                     logging.info('Start refill')
