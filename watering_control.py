@@ -76,7 +76,16 @@ class HAMqtt:
 
     def setup_mqtt_client(self) -> mqtt.Client:
         """Setup and return an MQTT client with reconnection support."""
-        mqtt_client = mqtt.Client()
+        # Use a stable client_id together with a persistent session
+        # (clean_session=False). This makes the broker keep the session and
+        # queue QoS 1 messages for us while we are disconnected, so commands
+        # sent during a network drop are delivered once we reconnect.
+        client_id = f"watering_control_{config['general']['device_name']}"
+        mqtt_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION1,
+            client_id=client_id,
+            clean_session=False,
+        )
         mqtt_client.username_pw_set(self.mqtt_user, self.mqtt_password)
         
         # Set up callback handlers
@@ -84,8 +93,11 @@ class HAMqtt:
         mqtt_client.on_disconnect = self.on_disconnect
         mqtt_client.on_publish = self.on_publish
         
-        # Note: reconnect_delay_set is not available in paho-mqtt 2.1.0
-        # We'll handle reconnection manually in connect_with_retry
+        # Built-in automatic reconnect backoff (loop_start handles the retries).
+        mqtt_client.reconnect_delay_set(
+            min_delay=self.reconnect_delay,
+            max_delay=self.max_reconnect_delay,
+        )
         
         mqtt_client.user_data_set(set())
         
@@ -131,7 +143,7 @@ class HAMqtt:
         """Resubscribe to all previously subscribed topics."""
         for topic in self.subscriptions:
             try:
-                result = self.mqtt_client.subscribe(topic)
+                result = self.mqtt_client.subscribe(topic, qos=1)
                 if result[0] == mqtt.MQTT_ERR_SUCCESS:
                     logging.debug(f"Resubscribed to topic: {topic}")
                 else:
@@ -164,7 +176,7 @@ class HAMqtt:
     def subscribe(self, topic: str):
         """Subscribe to a topic and track it for reconnection."""
         try:
-            result = self.mqtt_client.subscribe(topic)
+            result = self.mqtt_client.subscribe(topic, qos=1)
             if result[0] == mqtt.MQTT_ERR_SUCCESS:
                 self.subscriptions.append(topic)
                 logging.debug(f"Subscribed to topic: {topic}")
@@ -306,7 +318,9 @@ class HAMqtt:
           #"device_class": "enum",
           "enabled_by_default": True,
           "payload_on": "ON",
-          "payload_off": "OFF"
+          "payload_off": "OFF",
+          "qos": 1,
+          "retain": True
         }
         config_topic = f"homeassistant/switch/{device_name}/{zone_name}/config"
         self.send_data(config_topic, json.dumps(payload))
@@ -560,7 +574,7 @@ def on_message(mqttc, obj, msg):
         blocked_zones[zone] = time.time()
     if str(command) == 'OFF':
         rpi.set_status(ch, False)
-        blocked_zones.pop(zone)
+        blocked_zones.pop(zone, None)
 
     status_to_send = {}
     if config['general'].get('water_input_channel', '')!= '':
