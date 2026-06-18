@@ -17,7 +17,7 @@ try:
 except ImportError:
     GPIO = None  # Mock or fallback handled later
 
-TRIG = 26  # Associate pin 27 to TRIG
+TRIG = 13  # Associate pin 27 to TRIG
 ECHO = 19  # Associate pin 22 to Echo
 
 #import RPi.GPIO as GPIO
@@ -719,10 +719,18 @@ def main():
                 else:
                     status_to_send['high_water_state'] = 'No'
                 logging.info(f'Low: {low_level}, High: {high_level}')
-                status_to_send['bobber_state'] = rpi.get_bobber_state()
-                logging.info(f"Bobber: {status_to_send['bobber_state']}")
+                bobber_state = rpi.get_bobber_state()
+                status_to_send['bobber_state'] = bobber_state
+                logging.info(f"Bobber: {bobber_state}")
+                tank_refill_mode = config['general'].get('tank_refill_mode', 'ultrasonic')
                 #if low_level == False and high_level == False:
-                if water_amount < config['general']['refill_amount'] and high_level == False:
+                if tank_refill_mode == 'bobber':
+                    start_refill = bobber_state == 'low'
+                    stop_refill = bobber_state == 'high'
+                else:
+                    start_refill = water_amount < config['general']['refill_amount'] and high_level == False
+                    stop_refill = high_level == True
+                if start_refill:
                     logging.info('Start refill')
                     refill_timer = time.time()
                     #rpi.set_status(9, True) # Main power ON
@@ -733,7 +741,7 @@ def main():
                     refill_timer = 0
                     rpi.set_status(config['general']['water_input_channel'], False) # Water input OFF
                     #status_to_send['input_water_state'] = 'No'
-                if high_level == True:
+                if stop_refill:
                     logging.info('Stop refill')
                     refill_timer = 0
                     rpi.set_status(config['general']['water_input_channel'], False) # Water input OFF

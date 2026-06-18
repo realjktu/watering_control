@@ -1,7 +1,8 @@
 general:
   device_name: 'NorthWatering'
   main_power_channel: 9
-  water_input_channel: 2
+  water_input_channel: 19 #2->19
+  tank_refill_mode: bobber  # 'ultrasonic' or 'bobber'
   sleep_time: 30
   refill_timeout: 30
   refill_amount: 700
@@ -9,7 +10,7 @@ general:
   config_reload_timeout: 5
 zones:
   zone1:
-    channel: 3
+    channel: 26 #3->26
   plants:
     channel: 4
   bottom_middle_grass:
