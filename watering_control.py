@@ -17,8 +17,22 @@ try:
 except ImportError:
     GPIO = None  # Mock or fallback handled later
 
-TRIG = 13  # Associate pin 27 to TRIG
-ECHO = 19  # Associate pin 22 to Echo
+# I2C KeySens submersible liquid level sensor read through an ADS1115 ADC.
+# Sensor outputs 0 V (empty tank) up to 2.505 V (1000 liters / full tank).
+try:
+    import board
+    import busio
+    from adafruit_ads1x15 import ADS1115, AnalogIn, ads1x15
+except ImportError:
+    board = None
+    busio = None
+    ADS1115 = None
+    AnalogIn = None
+    ads1x15 = None
+
+# Level sensor calibration: voltage -> liters
+LEVEL_SENSOR_FULL_VOLTAGE = 2.505  # Voltage reported when the tank holds TANK_CAPACITY_LITERS
+TANK_CAPACITY_LITERS = 1000        # Liters at LEVEL_SENSOR_FULL_VOLTAGE
 
 #import RPi.GPIO as GPIO
 # dh - OFF
@@ -340,11 +354,20 @@ class RPIWatering:
         GPIO.setup(self.output_pins, GPIO.OUT, initial=GPIO.HIGH)
         GPIO.setup(input_pins, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         GPIO.setup([bobber_full_pin, bobber_low_pin], GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.setup(TRIG, GPIO.OUT)  # Set pin as GPIO out
-        GPIO.setup(ECHO, GPIO.IN)  # Set pin as GPIO in
-        GPIO.output(TRIG, False)  # Set TRIG as LOW
         #GPIO.setup(high_level_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         #GPIO.setup(low_level_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        # Set up the I2C level sensor (ADS1115 ADC, channel A0)
+        self.level_channel = None
+        if busio is not None and ADS1115 is not None:
+            try:
+                i2c = busio.I2C(board.SCL, board.SDA)
+                ads = ADS1115(i2c)
+                self.level_channel = AnalogIn(ads, ads1x15.Pin.A0)
+                logging.info("I2C level sensor (ADS1115) initialized.")
+            except Exception as e:
+                logging.error(f"Failed to initialize I2C level sensor: {e}")
+        else:
+            logging.warning("adafruit_ads1x15 not available. Level sensor disabled.")
         self.water_volume = 0
         self.water_flowtimer = 0
         self.volume_history = []
@@ -353,32 +376,31 @@ class RPIWatering:
             self.set_status_rpi(ch, True) #OFF
 
     def get_water_amount(self, max_attempts=20):
-        distance_stat = []
+        voltage_stat = []
         attempts = 0
         while attempts < max_attempts:
             attempts += 1
-            distance = self.get_distance()
-            if 20 < distance < 200:
-                distance_stat.append(distance)
-            if len(distance_stat) >= 5:
+            voltage = self.get_voltage()
+            # Accept readings within the sensor's operating range
+            # (allow a small margin for noise around the empty/full ends).
+            if voltage is not None and -0.05 <= voltage <= LEVEL_SENSOR_FULL_VOLTAGE + 0.1:
+                voltage_stat.append(voltage)
+            if len(voltage_stat) >= 5:
                 break
 
-        if len(distance_stat) == 0:
+        if len(voltage_stat) == 0:
             logging.warning(f'Sensor returned no valid readings after {max_attempts} attempts, using cached values')
             return (self.water_volume, 0)
 
-        if len(distance_stat) < 5:
-            logging.warning(f'Sensor returned only {len(distance_stat)} valid readings out of {attempts} attempts')
+        if len(voltage_stat) < 5:
+            logging.warning(f'Sensor returned only {len(voltage_stat)} valid readings out of {attempts} attempts')
 
-        distance = sum(distance_stat) / len(distance_stat)
-        #logger.info(f'Distance stat: {distance_stat}!!')
-        #logger.info(f'Distance: {distance}!!')
-        '''
-            700 - 38.5
-            800 - 29
-        '''
-        distance = round(distance, 2)
-        amount = (-11.11 * distance) + 1122.19
+        voltage = sum(voltage_stat) / len(voltage_stat)
+        voltage = round(voltage, 4)
+        # Convert voltage to liters: 0 V = empty, 2.505 V = 1000 liters
+        amount = (voltage / LEVEL_SENSOR_FULL_VOLTAGE) * TANK_CAPACITY_LITERS
+        # Clamp to the physical range of the tank
+        amount = max(0, min(TANK_CAPACITY_LITERS, amount))
         amount = round(amount, 0)
 
         # Smooth volume using moving average to filter sensor noise
@@ -398,36 +420,18 @@ class RPIWatering:
             if time_diff > 0:
                 water_diff = smoothed_amount - old_volume
                 water_flow = round((water_diff / time_diff) * 60)
-        logging.info(f'Distance: {distance} cm, Volume: {smoothed_amount} liters, Water flow: {water_flow} l/min')
+        logging.info(f'Voltage: {voltage} V, Volume: {smoothed_amount} liters, Water flow: {water_flow} l/min')
         return (smoothed_amount, water_flow)
 
-    def get_distance(self):
-        timeout = 1
-        GPIO.output(TRIG, True)  # Set TRIG as HIGH
-        time.sleep(0.00001)  # Delay of 0.00001 seconds
-        GPIO.output(TRIG, False)  # Set TRIG as LOW
-
-        pulse_start = time.time()
-        timeout_start = pulse_start
-        while GPIO.input(ECHO) == 0:
-            pulse_start = time.time()
-            if pulse_start - timeout_start > timeout:
-                break
-
-        pulse_end = time.time()
-        timeout_end = pulse_end
-        if GPIO.input(ECHO) == 1:
-            while GPIO.input(ECHO) == 1:
-                pulse_end = time.time()
-                if pulse_end - timeout_end > timeout:
-                    break
-
-        pulse_duration = pulse_end - pulse_start  # Pulse duration to a variable
-        #print(f'pulse_duration: {pulse_duration}')
-        distance = pulse_duration * 17150  # Calculate distance
-        distance = round(distance, 2)  # Round to two decimal points
-        #print("Distance:", distance, "cm")
-        return distance
+    def get_voltage(self):
+        """Read the level sensor voltage from the ADS1115 ADC (channel A0)."""
+        if self.level_channel is None:
+            return None
+        try:
+            return self.level_channel.voltage
+        except Exception as e:
+            logging.error(f"Failed to read level sensor voltage: {e}")
+            return None
 
     def get_status(self, channel):
         ch_status = GPIO.input(channel)
@@ -722,12 +726,13 @@ def main():
                 bobber_state = rpi.get_bobber_state()
                 status_to_send['bobber_state'] = bobber_state
                 logging.info(f"Bobber: {bobber_state}")
-                tank_refill_mode = config['general'].get('tank_refill_mode', 'ultrasonic')
+                tank_refill_mode = config['general'].get('tank_refill_mode', 'level')
                 #if low_level == False and high_level == False:
                 if tank_refill_mode == 'bobber':
                     start_refill = bobber_state == 'low'
                     stop_refill = bobber_state == 'high'
                 else:
+                    # Level-sensor based refill (I2C KeySens via ADS1115)
                     start_refill = water_amount < config['general']['refill_amount'] and high_level == False
                     stop_refill = high_level == True
                 if start_refill:

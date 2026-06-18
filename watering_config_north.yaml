@@ -2,7 +2,7 @@ general:
   device_name: 'NorthWatering'
   main_power_channel: 9
   water_input_channel: 19 #2->19
-  tank_refill_mode: bobber  # 'ultrasonic' or 'bobber'
+  tank_refill_mode: bobber  # 'level' (I2C level sensor) or 'bobber'
   sleep_time: 30
   refill_timeout: 30
   refill_amount: 700
