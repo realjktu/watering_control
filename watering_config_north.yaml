@@ -1,7 +1,7 @@
 general:
   device_name: 'NorthWatering'
   main_power_channel: 9
-  water_input_channel: 19 #2->19
+  water_input_channel: 4
   tank_refill_mode: bobber  # 'level' (I2C level sensor) or 'bobber'
   sleep_time: 30
   refill_timeout: 30
@@ -10,9 +10,9 @@ general:
   config_reload_timeout: 5
 zones:
   zone1:
-    channel: 26 #3->26
+    channel: 19
   plants:
-    channel: 4
+    channel: 26
   bottom_middle_grass:
     channel: 17
   bottom_grass:
